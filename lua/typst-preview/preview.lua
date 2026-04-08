@@ -83,11 +83,14 @@ function M.clear_preview()
     renderer.clear()
 end
 
-local function update_page_count()
-    local res = vim.system({ "pdfinfo", preview_pdf }):wait()
-    if res.code ~= 0 then return end
-    local n = res.stdout:match("Pages:%s+(%d+)")
-    if n then state.pages.total = tonumber(n) end
+local function update_page_count(cb)
+    vim.system({ "pdfinfo", preview_pdf }, {}, function(res)
+        if res.code == 0 then
+            local n = res.stdout:match("Pages:%s+(%d+)")
+            if n then state.pages.total = tonumber(n) end
+        end
+        if cb then cb() end
+    end)
 end
 
 --- Convert current page of the PDF to PNG via pdftoppm, then render
@@ -125,8 +128,9 @@ function M.convert_and_render()
 end
 
 local function on_pdf_change()
-    update_page_count()
-    M.convert_and_render()
+    update_page_count(function()
+        M.convert_and_render()
+    end)
 end
 
 local function start_watcher()
