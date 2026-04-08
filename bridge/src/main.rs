@@ -131,6 +131,7 @@ async fn main() {
             continue;
         }
 
+        svg.reset();
         if let Some(svg_str) = render_page(&mut client, &mut svg, args.page) {
             if let Ok(mut f) = std::fs::File::create(&args.out) {
                 let _ = f.write_all(svg_str.as_bytes());
