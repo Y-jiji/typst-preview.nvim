@@ -190,17 +190,29 @@ function M.start(buf, path, svg_out)
 
     local ctrl_port = nil
     local data_port = nil
+
+    local function try_init()
+        if not ctrl_port or not data_port then return end
+        -- Send initial content to trigger compilation after bridge connects
+        vim.defer_fn(function()
+            local content = table.concat(vim.api.nvim_buf_get_lines(st.buf, 0, -1, false), "\n")
+            M.update(path, content)
+        end, 500)
+    end
+
     stderr:read_start(function(err, data)
         if err or not data then return end
         local cp = data:match("Control panel server listening on: 127%.0%.0%.1:(%d+)")
         if cp and not ctrl_port then
             ctrl_port = cp
             connect_ws(cp)
+            try_init()
         end
         local dp = data:match("Data plane server listening on: 127%.0%.0%.1:(%d+)")
         if dp and not data_port then
             data_port = dp
             start_bridge(dp)
+            try_init()
         end
     end)
 end
