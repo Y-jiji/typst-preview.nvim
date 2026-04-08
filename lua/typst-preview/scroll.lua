@@ -26,42 +26,49 @@ local st = {
     svg_out = "",
 }
 
+---@type string[]
+local pending = {}
+
+local function flush_pending()
+    if not st.ws_in then return end
+    for _, msg in ipairs(pending) do
+        st.ws_in:write(msg)
+    end
+    pending = {}
+end
+
+---@param title string
+---@param lines string[]
+---@return number?
+local function find_heading(title, lines)
+    for i, ln in ipairs(lines) do
+        local hd = ln:match("^=+%s+(.+)$")
+        if hd and hd:find(title, 1, true) then
+            return i
+        end
+    end
+    return nil
+end
+
 ---@param items table[]
 local function on_outline(items)
     vim.schedule(function()
         local lines = vim.api.nvim_buf_get_lines(st.buf, 0, -1, false)
         local map = {}
-        for _, item in ipairs(items) do
-            local page = item.position.page_no
-            local title = item.title
-            for i, ln in ipairs(lines) do
-                local hd = ln:match("^=+%s+(.+)$")
-                if hd and hd:find(title, 1, true) then
-                    table.insert(map, { line = i, page = page })
-                    break
+        local function collect(list)
+            for _, item in ipairs(list) do
+                local ln = find_heading(item.title, lines)
+                if ln then
+                    table.insert(map, { line = ln, page = item.position.page_no })
                 end
-            end
-            if item.children then
-                for _, child in ipairs(item.children) do
-                    local cp = child.position.page_no
-                    local ct = child.title
-                    for i, ln in ipairs(lines) do
-                        local hd = ln:match("^=+%s+(.+)$")
-                        if hd and hd:find(ct, 1, true) then
-                            table.insert(map, { line = i, page = cp })
-                            break
-                        end
-                    end
-                end
+                if item.children then collect(item.children) end
             end
         end
+        collect(items)
         table.sort(map, function(a, b) return a.line < b.line end)
         st.map = map
     end)
 end
-
----@type fun()?
-local on_compile = nil
 
 ---@param json_str string
 local function on_msg(json_str)
@@ -69,8 +76,6 @@ local function on_msg(json_str)
     if not ok then return end
     if msg.event == "outline" and msg.items then
         on_outline(msg.items)
-    elseif msg.event == "compileStatus" and msg.kind == "CompileSuccess" then
-        if on_compile then on_compile() end
     end
 end
 
@@ -120,17 +125,6 @@ local function start_bridge(port)
     end)
 end
 
----@type string[]
-local pending = {}
-
-local function flush_pending()
-    if not st.ws_in then return end
-    for _, msg in ipairs(pending) do
-        st.ws_in:write(msg)
-    end
-    pending = {}
-end
-
 ---@param path string
 ---@param content string
 function M.update(path, content)
@@ -147,19 +141,6 @@ function M.update(path, content)
 end
 
 ---@param line number
----@param char number
-function M.scroll(line, char)
-    if not st.ws_in then return end
-    local msg = vim.json.encode({
-        event = "panelScrollTo",
-        filepath = st.path,
-        line = line,
-        character = char,
-    })
-    st.ws_in:write(msg .. "\n")
-end
-
----@param line number
 ---@return number?
 function M.page_at(line)
     if #st.map == 0 then return nil end
@@ -169,11 +150,6 @@ function M.page_at(line)
         page = entry.page
     end
     return page
-end
-
----@param cb fun()
-function M.on_compile(cb)
-    on_compile = cb
 end
 
 ---@param bufnr number
@@ -187,11 +163,6 @@ function M.watch_buf(bufnr)
             M.update(path, content)
         end,
     })
-end
-
----@return string
-function M.svg_path()
-    return st.svg_out
 end
 
 ---@param buf number
@@ -267,7 +238,6 @@ function M.stop()
     pending = {}
 end
 
---- Install the bridge binary globally via cargo if missing.
 ---@return boolean
 function M.ensure_bridge()
     if vim.fn.executable(bridge_bin) == 1 then return true end
