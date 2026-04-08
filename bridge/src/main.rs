@@ -95,33 +95,39 @@ fn render_page(client: &mut IncrDocClient, page: usize) -> Option<String> {
     let mut svg = IncrSvgDocClient::new();
     let raw = svg.render_in_window(client, rect);
 
-    // Patch the <svg> tag: replace viewBox/width/height to show
-    // only the target page region.
+    // Patch SVG viewBox to clip to target page.
+    // Parse existing viewBox "0 0 W H" and replace with page region.
+    // Compute page Y ratio relative to total document height.
     let close = raw.find('>')?;
-    let tag = &raw[..close];
-    let rest = &raw[close..];
+    let hdr = &raw[..close];
 
-    let mut patched = String::with_capacity(raw.len());
-    for attr in tag.split_inclusive('"') {
-        if attr.contains("viewBox=\"") {
-            patched.push_str(&format!(
-                "viewBox=\"{y_off:.3} 0 {pg_w:.3} {pg_h:.3}\""
-            ));
-        } else if attr.contains("width=\"") {
-            patched.push_str(&format!("width=\"{pg_w:.3}\""));
-        } else if attr.contains("height=\"") {
-            patched.push_str(&format!("height=\"{pg_h:.3}\""));
-        } else if attr.contains("data-width=\"") {
-            patched.push_str(&format!("data-width=\"{pg_w:.3}\""));
-        } else if attr.contains("data-height=\"") {
-            patched.push_str(&format!("data-height=\"{pg_h:.3}\""));
-        } else {
-            patched.push_str(attr);
-        }
-    }
-    patched.push_str(rest);
+    // Extract total dimensions from viewBox="0 0 W H"
+    let vb_s = hdr.find("viewBox=\"")? + 9;
+    let vb_e = raw[vb_s..].find('"')? + vb_s;
+    let vb: Vec<&str> = raw[vb_s..vb_e].split_whitespace().collect();
+    if vb.len() != 4 { return Some(raw); }
+    let svg_w: f32 = vb[2].parse().ok()?;
+    let svg_h: f32 = vb[3].parse().ok()?;
 
-    Some(patched)
+    // Scale page geometry to SVG coordinate space
+    let scale = svg_h / tot_h;
+    let sv_y = y_off * scale;
+    let sv_w = pg_w * scale;
+    let sv_h = pg_h * scale;
+
+    let old_vb = format!("viewBox=\"{vb}\"", vb = raw[vb_s..vb_e].to_string());
+    let new_vb = format!("viewBox=\"0 {sv_y:.3} {sv_w:.3} {sv_h:.3}\"");
+    let old_wh = format!("width=\"{svg_w:.3}\" height=\"{svg_h:.3}\"");
+    let new_wh = format!("width=\"{sv_w:.3}\" height=\"{sv_h:.3}\"");
+    let old_dw = format!("data-width=\"{svg_w:.3}\" data-height=\"{svg_h:.3}\"");
+    let new_dw = format!("data-width=\"{sv_w:.3}\" data-height=\"{sv_h:.3}\"");
+
+    let out = raw
+        .replacen(&old_vb, &new_vb, 1)
+        .replacen(&old_wh, &new_wh, 1)
+        .replacen(&old_dw, &new_dw, 1);
+
+    Some(out)
 }
 
 fn write_svg(path: &str, svg: &str) {
