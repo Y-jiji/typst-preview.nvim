@@ -93,24 +93,22 @@ function M.convert_and_render()
     end
 
     local ppi = config.ppi
-    if ppi == 0 and state.meta.cell_width and state.meta.cell_width > 0 then
-        local cols = math.min(config.max_width, state.meta.win_cols)
-        local px = cols * state.meta.cell_width
-        local f = io.open(preview_svg, "r")
-        if f then
-            local hdr = f:read(500) or ""
-            f:close()
-            local svg_w = hdr:match('width="([%d%.]+)"')
-            svg_w = tonumber(svg_w) or 1
-            ppi = (px / svg_w) * 72
+    if ppi == 0 then
+        local px = state.meta.preview_px or 0
+        if px > 0 then
+            local f = io.open(preview_svg, "r")
+            if f then
+                local hdr = f:read(500) or ""
+                f:close()
+                local sw = tonumber(hdr:match('width="([%d%.]+)"')) or 0
+                if sw > 0 then ppi = (px / sw) * 72 end
+            end
         end
-    end
     if ppi <= 0 then ppi = 144 end
     local zoom = tostring(ppi / 72)
     current_job = vim.system({
         "rsvg-convert",
         "--zoom", zoom,
-        "--background-color", "white",
         "-o", preview_png,
         preview_svg,
     }, {}, function(obj)
@@ -149,11 +147,13 @@ end
 
 function M.update_meta()
     local cell_width, cell_height = utils.get_cell_dimensions()
+    local prev_cols = vim.api.nvim_win_get_width(state.preview.win)
     state.meta = {
         win_rows = vim.api.nvim_win_get_height(0),
-        win_cols = vim.api.nvim_win_get_width(state.code.win) + vim.api.nvim_win_get_width(state.preview.win) + 1,
+        win_cols = vim.api.nvim_win_get_width(state.code.win) + prev_cols + 1,
         cell_height = cell_height,
         cell_width = cell_width,
+        preview_px = prev_cols * cell_width,
     }
 end
 
