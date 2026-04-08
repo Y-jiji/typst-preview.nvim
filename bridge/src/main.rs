@@ -109,6 +109,7 @@ async fn main() {
     let (ws, _) = connect_async(&args.url)
         .await
         .expect("failed to connect to data plane");
+    eprintln!("tvp-bridge: connected");
 
     let (_, mut read) = ws.split();
 

@@ -84,6 +84,7 @@ local function connect_ws(port)
             "ws://127.0.0.1:" .. port .. "/" },
         stdio = { st.ws_in, ws_out, ws_err },
     })
+    flush_pending()
 
     local buf = ""
     ws_out:read_start(function(err, data)
@@ -98,25 +99,51 @@ local function connect_ws(port)
     end)
 end
 
+---@type fun()?
+local on_bridge_ready = nil
+
 ---@param port string
 local function start_bridge(port)
+    local br_err = uv.new_pipe()
     st.bridge, _ = uv.spawn(bridge_bin, {
         args = { "--url", "ws://127.0.0.1:" .. port .. "/",
             "--page", "1",
             "--out", st.svg_out },
-        stdio = { nil, nil, nil },
+        stdio = { nil, nil, br_err },
     })
+    br_err:read_start(function(err, data)
+        if err or not data then return end
+        if data:find("tvp%-bridge: connected") and on_bridge_ready then
+            on_bridge_ready()
+            on_bridge_ready = nil
+        end
+    end)
+end
+
+---@type string[]
+local pending = {}
+
+local function flush_pending()
+    if not st.ws_in then return end
+    for _, msg in ipairs(pending) do
+        st.ws_in:write(msg)
+    end
+    pending = {}
 end
 
 ---@param path string
 ---@param content string
 function M.update(path, content)
-    if not st.ws_in then return end
     local msg = vim.json.encode({
         event = "updateMemoryFiles",
         files = { [path] = content },
-    })
-    st.ws_in:write(msg .. "\n")
+    }) .. "\n"
+    if st.ws_in then
+        flush_pending()
+        st.ws_in:write(msg)
+    else
+        table.insert(pending, msg)
+    end
 end
 
 ---@param line number
@@ -188,31 +215,33 @@ function M.start(buf, path, svg_out)
         return
     end
 
-    local ctrl_port = nil
-    local data_port = nil
+    local ctrl_ready = false
+    local bridge_ready = false
 
-    local function try_init()
-        if not ctrl_port or not data_port then return end
-        -- Send initial content to trigger compilation after bridge connects
-        vim.defer_fn(function()
+    local function send_init()
+        if not ctrl_ready or not bridge_ready then return end
+        vim.schedule(function()
             local content = table.concat(vim.api.nvim_buf_get_lines(st.buf, 0, -1, false), "\n")
             M.update(path, content)
-        end, 500)
+        end)
+    end
+
+    on_bridge_ready = function()
+        bridge_ready = true
+        send_init()
     end
 
     stderr:read_start(function(err, data)
         if err or not data then return end
         local cp = data:match("Control panel server listening on: 127%.0%.0%.1:(%d+)")
-        if cp and not ctrl_port then
-            ctrl_port = cp
+        if cp and not ctrl_ready then
             connect_ws(cp)
-            try_init()
+            ctrl_ready = true
+            send_init()
         end
         local dp = data:match("Data plane server listening on: 127%.0%.0%.1:(%d+)")
-        if dp and not data_port then
-            data_port = dp
+        if dp then
             start_bridge(dp)
-            try_init()
         end
     end)
 end
@@ -235,6 +264,7 @@ function M.stop()
         st.server = nil
     end
     st.map = {}
+    pending = {}
 end
 
 --- Install the bridge binary globally via cargo if missing.
