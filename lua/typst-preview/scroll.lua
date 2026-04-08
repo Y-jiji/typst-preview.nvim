@@ -195,11 +195,19 @@ function M.start(buf, path, svg_out)
     st.svg_out = svg_out
 
     local stderr = uv.new_pipe()
+    local dark = vim.o.background == "dark"
+    local args = { "preview", "--no-open",
+        "--data-plane-host", "127.0.0.1:0",
+        "--control-plane-host", "127.0.0.1:0",
+    }
+    if dark then
+        table.insert(args, "--invert-colors")
+        table.insert(args, "auto")
+    end
+    table.insert(args, path)
+
     st.server, _ = uv.spawn("tinymist", {
-        args = { "preview", "--no-open",
-            "--data-plane-host", "127.0.0.1:0",
-            "--control-plane-host", "127.0.0.1:0",
-            path },
+        args = args,
         stdio = { nil, nil, stderr },
     })
     if not st.server then
