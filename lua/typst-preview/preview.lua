@@ -92,10 +92,10 @@ function M.convert_and_render()
         current_job = nil
     end
 
+    local zoom = tostring(config.ppi / 72)
     current_job = vim.system({
         "rsvg-convert",
-        "-d", tostring(config.ppi),
-        "-p", tostring(config.ppi),
+        "--zoom", zoom,
         "-o", preview_png,
         preview_svg,
     }, {}, function(obj)

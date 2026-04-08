@@ -193,10 +193,10 @@ function M.start(buf, path, svg_out)
         if not ctrl_ready or not bridge_ready then return end
         vim.schedule(function()
             local content = table.concat(vim.api.nvim_buf_get_lines(st.buf, 0, -1, false), "\n")
-            -- Append space to force a diff vs on-disk content,
+            -- Append a zero-width space to force a diff vs on-disk content,
             -- ensuring tinymist recompiles and the bridge gets its first frame.
             -- Next real edit sends correct content.
-            M.update(path, content .. " ")
+            M.update(path, content .. "\u{200b}")
         end)
     end
 
