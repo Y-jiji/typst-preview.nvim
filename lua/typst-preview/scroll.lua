@@ -54,12 +54,17 @@ local function on_outline(items)
     end)
 end
 
+---@type fun()?
+local on_compile = nil
+
 ---@param json_str string
 local function on_msg(json_str)
     local ok, msg = pcall(vim.json.decode, json_str)
     if not ok then return end
     if msg.event == "outline" and msg.items then
         on_outline(msg.items)
+    elseif msg.event == "compileStatus" and msg.kind == "CompileSuccess" then
+        if on_compile then on_compile() end
     end
 end
 
@@ -88,12 +93,15 @@ local function connect_ws(port)
 end
 
 --- Send buffer content to preview server as memory file
+--- - `path`: absolute file path
 --- - `content`: file content string
-function M.update(content)
+---@param path string
+---@param content string
+function M.update(path, content)
     if not st.ws_in then return end
     local msg = vim.json.encode({
         event = "updateMemoryFiles",
-        files = { [st.path] = content },
+        files = { [path] = content },
     })
     st.ws_in:write(msg .. "\n")
 end
@@ -130,6 +138,26 @@ end
 --- Start preview server and websocat for scroll sync
 --- - `buf`: buffer number
 --- - `path`: absolute file path
+--- Set callback for successful compilation
+---@param cb fun()
+function M.on_compile(cb)
+    on_compile = cb
+end
+
+--- Register per-buffer autocmds for a typst buffer
+---@param bufnr number
+function M.watch_buf(bufnr)
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+        group = "TypstPreview",
+        buffer = bufnr,
+        callback = function()
+            local content = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n")
+            M.update(path, content)
+        end,
+    })
+end
+
 ---@param buf number
 ---@param path string
 function M.start(buf, path)

@@ -238,6 +238,22 @@ function M.last_page()
     M.goto_page(state.pages.total)
 end
 
+--- Nudge the LSP with a didChange on the main buffer to trigger onType export
+function M.poke_export()
+    local client = utils.get_lsp(state.code.buf)
+    if not client then return end
+    vim.schedule(function()
+        local content = table.concat(vim.api.nvim_buf_get_lines(state.code.buf, 0, -1, false), "\n")
+        local uri = vim.uri_from_bufnr(state.code.buf)
+        local ver = (vim.lsp.util.buf_versions[state.code.buf] or 0) + 1
+        vim.lsp.util.buf_versions[state.code.buf] = ver
+        client.notify("textDocument/didChange", {
+            textDocument = { uri = uri, version = ver },
+            contentChanges = { { text = content } },
+        })
+    end)
+end
+
 function M.open_preview()
     setup_preview_win()
     M.update_meta()

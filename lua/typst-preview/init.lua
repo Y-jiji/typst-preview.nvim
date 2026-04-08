@@ -5,16 +5,24 @@ local function setup_autocmds()
     local preview = require("typst-preview.preview")
     local scroll = require("typst-preview.scroll")
     vim.api.nvim_create_augroup("TypstPreview", {})
+
+    -- Watch all open typst buffers, and future ones via FileType
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.bo[bufnr].filetype == "typst" then
+            scroll.watch_buf(bufnr)
+        end
+    end
+    vim.api.nvim_create_autocmd("FileType", {
+        group = "TypstPreview",
+        pattern = "typst",
+        callback = function(ev) scroll.watch_buf(ev.buf) end,
+    })
+
+    -- On compile success from preview server, force PDF re-export
+    scroll.on_compile(function() preview.poke_export() end)
+
     local last_line
     require("typst-preview.utils").create_autocmds({
-        {
-            event = { "TextChanged", "TextChangedI" },
-            callback = function()
-                local buf = vim.api.nvim_get_current_buf()
-                local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-                scroll.update(content)
-            end,
-        },
         {
             event = "CursorMoved",
             callback = function()
