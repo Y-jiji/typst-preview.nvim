@@ -201,11 +201,18 @@ function M.start(buf, path, svg_out)
     st.svg_out = svg_out
 
     local stderr = uv.new_pipe()
+    local srv_args = { "preview", "--no-open",
+        "--data-plane-host", "127.0.0.1:0",
+        "--control-plane-host", "127.0.0.1:0" }
+    local root = require("typst-preview.config").opts.preview.root
+    if root then
+        table.insert(srv_args, "--root")
+        table.insert(srv_args, root)
+    end
+    table.insert(srv_args, path)
+
     st.server, _ = uv.spawn("tinymist", {
-        args = { "preview", "--no-open",
-            "--data-plane-host", "127.0.0.1:0",
-            "--control-plane-host", "127.0.0.1:0",
-            path },
+        args = srv_args,
         stdio = { nil, nil, stderr },
     })
     if not st.server then

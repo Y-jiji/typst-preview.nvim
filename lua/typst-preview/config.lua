@@ -2,6 +2,7 @@
 ---@field max_width? number
 ---@field ppi? number
 ---@field position? 'left' | 'right'
+---@field root? string
 
 ---@class StatusLineOpts
 ---@field enabled? boolean
