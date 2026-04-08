@@ -3,18 +3,26 @@ local running = false
 
 local function setup_autocmds()
     local preview = require("typst-preview.preview")
+    local scroll = require("typst-preview.scroll")
     vim.api.nvim_create_augroup("TypstPreview", {})
+    local last_line
     require("typst-preview.utils").create_autocmds({
         {
             event = { "TextChanged", "TextChangedI" },
             callback = function()
-                preview.compile_and_render()
+                local buf = vim.api.nvim_get_current_buf()
+                local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+                scroll.update(content)
             end,
         },
         {
-            event = "BufWritePost",
+            event = "CursorMoved",
             callback = function()
-                preview.compile_and_render()
+                local line = vim.api.nvim_win_get_cursor(0)[1]
+                if last_line == line then return end
+                last_line = line
+                local page = scroll.page_at(line)
+                if page then preview.goto_page(page) end
             end,
         },
         {
@@ -34,7 +42,7 @@ local function setup_autocmds()
             no_ft = true,
             event = "VimResume",
             callback = function()
-                if vim.bo.filetype == "typst" then preview.compile_and_render() end
+                if vim.bo.filetype == "typst" then preview.convert_and_render() end
             end,
         },
         {

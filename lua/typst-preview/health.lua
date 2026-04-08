@@ -45,7 +45,9 @@ end
 function M.check()
     health.start("MyPlugin: checking dependencies")
 
-    check_bin("typst")
+    check_bin("tinymist")
+    check_bin("websocat")
+    check_bin("pdftoppm")
     check_bin("pdfinfo")
     if vim.env.TMUX then check_tmux_options() end
 end

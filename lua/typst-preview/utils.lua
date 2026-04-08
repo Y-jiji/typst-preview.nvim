@@ -1,4 +1,3 @@
-local config = require("typst-preview.config").opts
 local log = require("typst-preview.logger")
 local M = {}
 
@@ -42,29 +41,14 @@ function M.bytes_to_number(s)
 end
 
 ---@param buf number
----@return string
-function M.get_buf_content(buf)
-    return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-end
-
----@param opts { format: 'png' | 'pdf', pages?: number, input?: string, output?: string, ppi?: number }
----@return table
-function M.typst_compile_cmd(opts)
-    local cmd = {
-        "typst",
-        "compile",
-        "-f",
-        opts.format,
-        "--ppi",
-        tostring(opts.ppi or config.preview.ppi),
-        opts.input or "-",
-        opts.output or "-",
-    }
-    if opts.pages then
-        table.insert(cmd, "--pages")
-        table.insert(cmd, tostring(opts.pages))
+---@return vim.lsp.Client?
+function M.get_lsp(buf)
+    local cls = vim.lsp.get_clients({ bufnr = buf, name = "tinymist" })
+    if #cls == 0 then
+        log.error("tinymist LSP not attached to buffer")
+        return nil
     end
-    return cmd
+    return cls[1]
 end
 
 ---@param filename string

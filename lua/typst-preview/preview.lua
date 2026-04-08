@@ -14,7 +14,7 @@ local uv = vim.uv
 ---@field code { win: number, buf: number, compiled: boolean }
 ---@field preview { win?: number, buf: number }
 ---@field pages { total: number, current: number, placements: {
----width: number, height: number, rows: number, cols:number , win_offset: number }[] } width, height -> pixels | rows, cols -> cells
+---width: number, height: number, rows: number, cols:number , win_offset: number }[] }
 ---@field meta { cell_width: number, cell_height: number, win_rows: number, win_cols: number }
 local state = {
     code = {},
@@ -27,18 +27,54 @@ local state = {
     meta = {},
 }
 
-local preview_dir = vim.fn.stdpath("cache") .. "/typst_preview/"
+local pid = vim.fn.getpid()
+local preview_dir = "/dev/shm/typst_preview_" .. pid .. "/"
 if not uv.fs_stat(preview_dir) then uv.fs_mkdir(preview_dir, 493) end
-local preview_png = preview_dir .. vim.fn.expand("%:t:r") .. ".png"
+
+local stem = vim.fn.expand("%:t:r")
+local preview_pdf = preview_dir .. stem .. ".pdf"
+local preview_png = preview_dir .. "page.png"
+
+---@type uv.uv_fs_event_t?
+local watcher = nil
+
+---@type vim.SystemObj?
+local current_job = nil
+
+---@param force boolean?
+function M.update_preview_size(force)
+    local img_height, img_width = utils.get_page_dimensions(preview_png)
+    local page = state.pages.placements[state.pages.current]
+    if force or not page or page.width ~= img_width or page.height ~= img_height then
+        local rows = state.meta.win_rows
+        local cols = math.ceil((state.meta.cell_height * rows * img_width) / (img_height * state.meta.cell_width))
+        if cols > config.max_width then
+            cols = config.max_width
+            rows = math.ceil((state.meta.cell_width * cols * img_height) / (img_width * state.meta.cell_height))
+        end
+        page = {
+            width = img_width,
+            height = img_height,
+            cols = cols or 0,
+            rows = rows,
+            win_offset = config.position == "left" and 0 or state.meta.win_cols - cols + 1,
+        }
+        state.pages.placements[state.pages.current] = page
+    end
+    vim.schedule(function()
+        vim.api.nvim_win_set_width(state.preview.win, page.cols)
+    end)
+end
 
 function M.render()
+    if not uv.fs_stat(preview_png) then return end
     M.update_preview_size()
-    local page_placement = state.pages.placements[state.pages.current]
+    local page = state.pages.placements[state.pages.current]
     renderer.render(
         preview_png,
-        page_placement.win_offset,
-        page_placement.rows,
-        page_placement.cols,
+        page.win_offset,
+        page.rows,
+        page.cols,
         state.meta.win_rows
     )
 end
@@ -47,81 +83,89 @@ function M.clear_preview()
     renderer.clear()
 end
 
----@type vim.SystemObj?
-local current_job
-function M.compile_and_render()
+local function update_page_count()
+    local res = vim.system({ "pdfinfo", preview_pdf }):wait()
+    if res.code ~= 0 then return end
+    local n = res.stdout:match("Pages:%s+(%d+)")
+    if n then state.pages.total = tonumber(n) end
+end
+
+--- Convert current page of the PDF to PNG via pdftoppm, then render
+function M.convert_and_render()
+    if not uv.fs_stat(preview_pdf) then return end
+
     if current_job and not current_job:is_closing() then
         current_job:kill(9)
         current_job = nil
     end
 
-    local cmd = utils.typst_compile_cmd({
-        format = "png",
-        pages = state.pages.current,
-        output = preview_png,
-    })
-
-    current_job = vim.system(cmd, { stdin = utils.get_buf_content(state.code.buf) }, function(obj)
-        if obj.signal ~= 9 then
-            if obj.code == 0 then
-                state.code.compiled = true
-                M.update_preview_size()
-                M.render()
-            else
-                vim.schedule(function()
-                    log.warn("(preview) compilation failed:\n" .. obj.stderr)
-                end)
-                state.code.compiled = false
-            end
+    current_job = vim.system({
+        "pdftoppm", "-png", "-singlefile",
+        "-f", tostring(state.pages.current),
+        "-l", tostring(state.pages.current),
+        "-r", tostring(config.ppi),
+        preview_pdf,
+        preview_dir .. "page",
+    }, {}, function(obj)
+        if obj.signal == 9 then return end
+        if obj.code == 0 then
+            state.code.compiled = true
+            M.update_preview_size()
+            M.render()
+        else
+            state.code.compiled = false
             vim.schedule(function()
-                statusline.update(state)
+                log.warn("(preview) pdftoppm failed:\n" .. obj.stderr)
             end)
         end
+        vim.schedule(function()
+            statusline.update(state)
+        end)
     end)
 end
 
-local function update_total_page_number()
-    local target_pdf = preview_dir .. "preview.pdf"
-    local typst_cmd = utils.typst_compile_cmd({
-        format = "pdf",
-        output = target_pdf,
+local function on_pdf_change()
+    update_page_count()
+    M.convert_and_render()
+end
+
+local function start_watcher()
+    watcher = uv.new_fs_event()
+    local pdf_name = stem .. ".pdf"
+    watcher:start(preview_dir, {}, function(err, fname)
+        if err or fname ~= pdf_name then return end
+        on_pdf_change()
+    end)
+end
+
+local function stop_watcher()
+    if watcher then
+        watcher:stop()
+        watcher:close()
+        watcher = nil
+    end
+end
+
+local function configure_lsp()
+    local client = utils.get_lsp(state.code.buf)
+    if not client then return false end
+    client.notify("workspace/didChangeConfiguration", {
+        settings = {
+            exportPdf = "onType",
+            outputPath = preview_dir .. "$name",
+        },
     })
-    local cmd = table.concat(typst_cmd, " ")
-    cmd = cmd .. " << 'EOF'\n" .. utils.get_buf_content(state.code.buf) .. "\nEOF\n"
-    cmd = cmd .. "pdfinfo " .. target_pdf .. " | grep Pages | awk '{print $2}'"
-    local res = vim.system({ vim.o.shell, vim.o.shellcmdflag, cmd }):wait()
-    local new_page_number = tonumber(res.stdout)
-    if not new_page_number then
-        log.warn("(preview) failed to get page number:\n" .. res.stderr)
-        return
-    end
-    state.pages.total = new_page_number
-    statusline.update(state)
+    return true
 end
 
----@param force boolean?
-function M.update_preview_size(force)
-    local img_height, img_width = utils.get_page_dimensions(preview_png)
-    local page_placement = state.pages.placements[state.pages.current]
-    if force or not page_placement or page_placement.width ~= img_width or page_placement.height ~= img_height then
-        local rows = state.meta.win_rows
-        local cols = math.ceil((state.meta.cell_height * rows * img_width) / (img_height * state.meta.cell_width))
-        if cols > config.max_width then
-            cols = config.max_width
-            rows = math.ceil((state.meta.cell_width * cols * img_height) / (img_width * state.meta.cell_height))
-        end
-        page_placement = {
-            width = img_width,
-            height = img_height,
-            cols = cols or 0,
-            rows = rows,
-            win_offset = config.position == "left" and 0 or state.meta.win_cols - cols + 1,
-        }
-        state.pages.placements[state.pages.current] = page_placement
-    end
-    vim.schedule(function()
-        vim.api.nvim_win_set_width(state.preview.win, page_placement.cols)
-    end)
+local function unconfigure_lsp()
+    local client = utils.get_lsp(state.code.buf)
+    if not client then return end
+    client.notify("workspace/didChangeConfiguration", {
+        settings = {
+            exportPdf = "never",
+        },
+    })
 end
 
 function M.update_meta()
@@ -157,7 +201,6 @@ end
 
 ---@param n number
 function M.goto_page(n)
-    update_total_page_number()
     if n > state.pages.total then
         n = state.pages.total
     elseif n < 1 then
@@ -167,7 +210,7 @@ function M.goto_page(n)
     if n == state.pages.current then return end
 
     state.pages.current = n
-    M.compile_and_render()
+    M.convert_and_render()
     statusline.update(state)
 end
 
@@ -193,14 +236,24 @@ end
 
 function M.open_preview()
     setup_preview_win()
-    update_total_page_number()
     M.update_meta()
-    M.compile_and_render()
+    if not configure_lsp() then return end
+    start_watcher()
+    local scroll = require("typst-preview.scroll")
+    local path = vim.api.nvim_buf_get_name(state.code.buf)
+    scroll.start(state.code.buf, path)
+    if uv.fs_stat(preview_pdf) then
+        on_pdf_change()
+    end
 end
 
 function M.close_preview()
     M.clear_preview()
+    stop_watcher()
+    require("typst-preview.scroll").stop()
+    unconfigure_lsp()
     vim.api.nvim_win_close(state.preview.win, true)
+    vim.fn.delete(preview_dir, "rf")
 end
 
 return M
