@@ -114,13 +114,15 @@ local on_bridge_ready = nil
 ---@type uv.uv_pipe_t?
 local bridge_in = nil
 
+local is_dark = false
+
 ---@param port string
 local function start_bridge(port)
     bridge_in = uv.new_pipe()
     local br_err = uv.new_pipe()
     local br_args = { "--url", "ws://127.0.0.1:" .. port .. "/",
         "--page", "1", "--out", st.svg_out }
-    if vim.o.background == "dark" then
+    if is_dark then
         table.insert(br_args, "--dark")
     end
     st.bridge, _ = uv.spawn(bridge_bin, {
@@ -193,6 +195,7 @@ end
 ---@param path string
 ---@param svg_out string
 function M.start(buf, path, svg_out)
+    is_dark = vim.o.background == "dark"
     st.buf = buf
     st.path = path
     st.svg_out = svg_out
