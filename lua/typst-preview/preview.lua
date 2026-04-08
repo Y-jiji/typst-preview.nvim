@@ -256,7 +256,9 @@ function M.close_preview()
     stop_watcher()
     require("typst-preview.scroll").stop()
     unconfigure_lsp()
-    vim.api.nvim_win_close(state.preview.win, true)
+    if vim.api.nvim_win_is_valid(state.preview.win) then
+        vim.api.nvim_win_close(state.preview.win, true)
+    end
     vim.fn.delete(preview_dir, "rf")
 end
 
