@@ -107,14 +107,18 @@ end
 ---@type fun()?
 local on_bridge_ready = nil
 
+---@type uv.uv_pipe_t?
+local bridge_in = nil
+
 ---@param port string
 local function start_bridge(port)
+    bridge_in = uv.new_pipe()
     local br_err = uv.new_pipe()
     st.bridge, _ = uv.spawn(bridge_bin, {
         args = { "--url", "ws://127.0.0.1:" .. port .. "/",
             "--page", "1",
             "--out", st.svg_out },
-        stdio = { nil, nil, br_err },
+        stdio = { bridge_in, nil, br_err },
     })
     br_err:read_start(function(err, data)
         if err or not data then return end
@@ -123,6 +127,14 @@ local function start_bridge(port)
             on_bridge_ready = nil
         end
     end)
+end
+
+--- Tell bridge to switch to a different page.
+---@param n number
+function M.set_page(n)
+    if bridge_in then
+        bridge_in:write(tostring(n) .. "\n")
+    end
 end
 
 ---@param path string
@@ -221,6 +233,10 @@ function M.start(buf, path, svg_out)
 end
 
 function M.stop()
+    if bridge_in then
+        if not bridge_in:is_closing() then bridge_in:close() end
+        bridge_in = nil
+    end
     if st.bridge then
         st.bridge:kill(9)
         st.bridge = nil

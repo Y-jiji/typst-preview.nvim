@@ -174,7 +174,7 @@ function M.goto_page(n)
     if n == state.pages.current then return end
 
     state.pages.current = n
-    M.convert_and_render()
+    require("typst-preview.scroll").set_page(n)
     statusline.update(state)
 end
 
