@@ -1,7 +1,6 @@
 /// Bridge between tinymist preview data plane and SVG output.
-/// Connects to the data plane WebSocket, receives incremental
-/// binary diffs, maintains document state, and writes per-page
-/// SVG to a file on each update.
+/// Accumulates incremental diffs via IncrDocClient, renders full
+/// standalone SVG per page by creating fresh IncrSvgDocClient each time.
 use std::io::Write;
 
 use clap::Parser;
@@ -27,31 +26,7 @@ struct Args {
     out: String,
 }
 
-/// Extract layout from delta metadata and set it on the client.
-fn apply_layout(client: &mut IncrDocClient, meta: &[ModuleMetadata]) {
-    for m in meta {
-        if let ModuleMetadata::Layout(regions) = m {
-            for region in regions.iter() {
-                match region {
-                    LayoutRegion::ByScalar(r) => {
-                        if let Some((_, node)) = r.layouts.first() {
-                            client.set_layout(node.clone());
-                            return;
-                        }
-                    }
-                    LayoutRegion::ByStr(r) => {
-                        if let Some((_, node)) = r.layouts.first() {
-                            client.set_layout(node.clone());
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Parse a data plane binary frame and merge into client state.
+/// Parse and merge a binary frame into client state.
 fn handle(client: &mut IncrDocClient, data: &[u8]) -> bool {
     let comma = match data.iter().position(|&b| b == b',') {
         Some(i) => i,
@@ -67,7 +42,24 @@ fn handle(client: &mut IncrDocClient, data: &[u8]) -> bool {
         "diff-v1" | "new" => {
             let stream = BytesModuleStream::from_slice(payload);
             let module = stream.checkout_owned();
-            apply_layout(client, &module.metadata);
+            for m in &module.metadata {
+                if let ModuleMetadata::Layout(regions) = m {
+                    for region in regions.iter() {
+                        match region {
+                            LayoutRegion::ByScalar(r) => {
+                                if let Some((_, node)) = r.layouts.first() {
+                                    client.set_layout(node.clone());
+                                }
+                            }
+                            LayoutRegion::ByStr(r) => {
+                                if let Some((_, node)) = r.layouts.first() {
+                                    client.set_layout(node.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             client.merge_delta(module);
             true
         }
@@ -75,12 +67,8 @@ fn handle(client: &mut IncrDocClient, data: &[u8]) -> bool {
     }
 }
 
-/// Render a single page to SVG.
-fn render_page(
-    client: &mut IncrDocClient,
-    svg: &mut IncrSvgDocClient,
-    page: usize,
-) -> Option<String> {
+/// Render one page to standalone SVG.
+fn render_page(client: &mut IncrDocClient, page: usize) -> Option<String> {
     let kern = client.kern();
     let pages = kern.pages_meta()?;
     if page == 0 || page > pages.len() {
@@ -99,6 +87,7 @@ fn render_page(
         hi: reflexo::vector::ir::Point::new(Scalar(x_hi), Scalar(y_hi)),
     };
 
+    let mut svg = IncrSvgDocClient::new();
     Some(svg.render_in_window(client, rect))
 }
 
@@ -112,9 +101,7 @@ async fn main() {
     eprintln!("tvp-bridge: connected");
 
     let (_, mut read) = ws.split();
-
     let mut client = IncrDocClient::default();
-    let mut svg = IncrSvgDocClient::new();
 
     while let Some(msg) = read.next().await {
         let msg = match msg {
@@ -131,8 +118,7 @@ async fn main() {
             continue;
         }
 
-        svg.reset();
-        if let Some(svg_str) = render_page(&mut client, &mut svg, args.page) {
+        if let Some(svg_str) = render_page(&mut client, args.page) {
             if let Ok(mut f) = std::fs::File::create(&args.out) {
                 let _ = f.write_all(svg_str.as_bytes());
             }
