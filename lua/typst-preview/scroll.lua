@@ -4,8 +4,10 @@ local M = {}
 
 local uv = vim.uv
 
-local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h:h")
-local bridge_bin = plugin_root .. "/bridge/target/release/tvp-bridge"
+local this_file = debug.getinfo(1, "S").source:sub(2)
+local plugin_root = vim.fn.fnamemodify(this_file, ":p:h:h:h:h")
+local bridge_dir = plugin_root .. "/bridge"
+local bridge_bin = bridge_dir .. "/target/release/tvp-bridge"
 
 ---@class ScrollState
 ---@field server uv.uv_process_t?
@@ -229,10 +231,9 @@ end
 --- Build the bridge binary if missing.
 ---@return boolean
 function M.ensure_bridge()
-    if vim.fn.executable(bridge_bin) == 1 then return true end
-    local dir = plugin_root .. "/bridge"
+    if uv.fs_stat(bridge_bin) then return true end
     vim.notify("typst-preview: building tvp-bridge (first time)...", vim.log.levels.INFO)
-    local res = vim.system({ "cargo", "build", "--release" }, { cwd = dir }):wait()
+    local res = vim.system({ "cargo", "build", "--release" }, { cwd = bridge_dir }):wait()
     if res.code ~= 0 then
         vim.notify("typst-preview: failed to build tvp-bridge:\n" .. (res.stderr or ""), vim.log.levels.ERROR)
         return false
