@@ -25,6 +25,31 @@ struct Args {
     /// Output path (writes on each update)
     #[arg(long)]
     out: String,
+    /// Invert colors for dark backgrounds
+    #[arg(long)]
+    dark: bool,
+}
+
+/// SVG filter that inverts RGB channels + dark background rect.
+const DARK_FILTER: &str = r#"<defs><filter id="tinv"><feComponentTransfer><feFuncR type="table" tableValues="1 0"/><feFuncG type="table" tableValues="1 0"/><feFuncB type="table" tableValues="1 0"/></feComponentTransfer></filter></defs>"#;
+
+fn apply_dark_proper(svg: &str) -> String {
+    let close = match svg.find('>') {
+        Some(i) => i + 1,
+        None => return svg.to_string(),
+    };
+    let end = match svg.rfind("</svg>") {
+        Some(i) => i,
+        None => return svg.to_string(),
+    };
+
+    let mut out = String::with_capacity(svg.len() + DARK_FILTER.len() + 40);
+    out.push_str(&svg[..close]);
+    out.push_str(DARK_FILTER);
+    out.push_str("<g filter=\"url(#tinv)\">");
+    out.push_str(&svg[close..end]);
+    out.push_str("</g></svg>");
+    out
 }
 
 /// Parse and merge a binary frame into client state.
@@ -69,7 +94,7 @@ fn handle(client: &mut IncrDocClient, data: &[u8]) -> bool {
 }
 
 /// Render one page to standalone SVG with correct viewBox.
-fn render_page(client: &mut IncrDocClient, page: usize) -> Option<String> {
+fn render_page(client: &mut IncrDocClient, page: usize, dark: bool) -> Option<String> {
     let kern = client.kern();
     let pages = kern.pages_meta()?;
     if page == 0 || page > pages.len() {
@@ -122,10 +147,14 @@ fn render_page(client: &mut IncrDocClient, page: usize) -> Option<String> {
     let old_dw = format!("data-width=\"{svg_w:.3}\" data-height=\"{svg_h:.3}\"");
     let new_dw = format!("data-width=\"{sv_w:.3}\" data-height=\"{sv_h:.3}\"");
 
-    let out = raw
+    let mut out = raw
         .replacen(&old_vb, &new_vb, 1)
         .replacen(&old_wh, &new_wh, 1)
         .replacen(&old_dw, &new_dw, 1);
+
+    if dark {
+        out = apply_dark_proper(&out);
+    }
 
     Some(out)
 }
@@ -167,7 +196,7 @@ async fn main() {
                 if !handle(&mut client, data) {
                     continue;
                 }
-                if let Some(svg) = render_page(&mut client, page) {
+                if let Some(svg) = render_page(&mut client, page, args.dark) {
                     write_svg(&args.out, &svg);
                 }
             }
@@ -176,7 +205,7 @@ async fn main() {
                     Ok(Some(s)) => {
                         if let Ok(n) = s.trim().parse::<usize>() {
                             page = n;
-                            if let Some(svg) = render_page(&mut client, page) {
+                            if let Some(svg) = render_page(&mut client, page, args.dark) {
                                 write_svg(&args.out, &svg);
                             }
                         }

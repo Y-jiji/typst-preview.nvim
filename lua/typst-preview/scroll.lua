@@ -118,10 +118,13 @@ local bridge_in = nil
 local function start_bridge(port)
     bridge_in = uv.new_pipe()
     local br_err = uv.new_pipe()
+    local br_args = { "--url", "ws://127.0.0.1:" .. port .. "/",
+        "--page", "1", "--out", st.svg_out }
+    if vim.o.background == "dark" then
+        table.insert(br_args, "--dark")
+    end
     st.bridge, _ = uv.spawn(bridge_bin, {
-        args = { "--url", "ws://127.0.0.1:" .. port .. "/",
-            "--page", "1",
-            "--out", st.svg_out },
+        args = br_args,
         stdio = { bridge_in, nil, br_err },
     })
     br_err:read_start(function(err, data)
@@ -195,19 +198,11 @@ function M.start(buf, path, svg_out)
     st.svg_out = svg_out
 
     local stderr = uv.new_pipe()
-    local dark = vim.o.background == "dark"
-    local args = { "preview", "--no-open",
-        "--data-plane-host", "127.0.0.1:0",
-        "--control-plane-host", "127.0.0.1:0",
-    }
-    if dark then
-        table.insert(args, "--invert-colors")
-        table.insert(args, "auto")
-    end
-    table.insert(args, path)
-
     st.server, _ = uv.spawn("tinymist", {
-        args = args,
+        args = { "preview", "--no-open",
+            "--data-plane-host", "127.0.0.1:0",
+            "--control-plane-host", "127.0.0.1:0",
+            path },
         stdio = { nil, nil, stderr },
     })
     if not st.server then
