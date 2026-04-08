@@ -4,10 +4,7 @@ local M = {}
 
 local uv = vim.uv
 
-local this_file = debug.getinfo(1, "S").source:sub(2)
-local plugin_root = vim.fn.fnamemodify(this_file, ":p:h:h:h:h")
-local bridge_dir = plugin_root .. "/bridge"
-local bridge_bin = bridge_dir .. "/target/release/tvp-bridge"
+local bridge_bin = "tvp-bridge"
 
 ---@class ScrollState
 ---@field server uv.uv_process_t?
@@ -228,17 +225,19 @@ function M.stop()
     st.map = {}
 end
 
---- Build the bridge binary if missing.
+--- Install the bridge binary globally via cargo if missing.
 ---@return boolean
 function M.ensure_bridge()
-    if uv.fs_stat(bridge_bin) then return true end
-    vim.notify("typst-preview: building tvp-bridge (first time)...", vim.log.levels.INFO)
-    local res = vim.system({ "cargo", "build", "--release" }, { cwd = bridge_dir }):wait()
+    if vim.fn.executable(bridge_bin) == 1 then return true end
+    vim.notify("typst-preview: installing tvp-bridge...", vim.log.levels.INFO)
+    local src = debug.getinfo(1, "S").source:sub(2)
+    local dir = vim.fn.fnamemodify(src, ":p:h:h:h") .. "/bridge"
+    local res = vim.system({ "cargo", "install", "--path", dir }):wait()
     if res.code ~= 0 then
-        vim.notify("typst-preview: failed to build tvp-bridge:\n" .. (res.stderr or ""), vim.log.levels.ERROR)
+        vim.notify("typst-preview: failed to install tvp-bridge:\n" .. (res.stderr or ""), vim.log.levels.ERROR)
         return false
     end
-    vim.notify("typst-preview: tvp-bridge built", vim.log.levels.INFO)
+    vim.notify("typst-preview: tvp-bridge installed", vim.log.levels.INFO)
     return true
 end
 
