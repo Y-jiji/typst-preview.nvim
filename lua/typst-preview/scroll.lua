@@ -204,7 +204,7 @@ function M.start(buf, path, svg_out)
     local srv_args = { "preview", "--no-open",
         "--data-plane-host", "127.0.0.1:0",
         "--control-plane-host", "127.0.0.1:0" }
-    local root = require("typst-preview.config").opts.preview.root
+    local root = require("typst-preview.config").opts.preview.root or vim.fn.getcwd()
     if root then
         table.insert(srv_args, "--root")
         table.insert(srv_args, root)
