@@ -104,6 +104,7 @@ function M.convert_and_render()
                 if sw > 0 then ppi = (px / sw) * 72 end
             end
         end
+    end
     if ppi <= 0 then ppi = 144 end
     local zoom = tostring(ppi / 72)
     current_job = vim.system({
