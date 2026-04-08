@@ -62,7 +62,7 @@ function M.update_preview_size(force)
         state.pages.placements[state.pages.current] = page
     end
     vim.schedule(function()
-        vim.api.nvim_win_set_width(state.preview.win, page.cols)
+        vim.api.nvim_win_set_width(state.preview.win, math.floor(page.cols))
     end)
 end
 
