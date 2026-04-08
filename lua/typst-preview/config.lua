@@ -15,7 +15,7 @@
 local default_opts = {
     preview = {
         max_width = 80,
-        ppi = 144,
+        ppi = 0,
         position = "right",
     },
     statusline = {
