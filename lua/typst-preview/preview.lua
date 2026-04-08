@@ -31,8 +31,7 @@ local pid = vim.fn.getpid()
 local preview_dir = "/dev/shm/typst_preview_" .. pid .. "/"
 if not uv.fs_stat(preview_dir) then uv.fs_mkdir(preview_dir, 493) end
 
-local stem = vim.fn.expand("%:t:r")
-local preview_pdf = preview_dir .. stem .. ".pdf"
+local preview_svg = preview_dir .. "page.svg"
 local preview_png = preview_dir .. "page.png"
 
 ---@type uv.uv_fs_event_t?
@@ -83,19 +82,9 @@ function M.clear_preview()
     renderer.clear()
 end
 
-local function update_page_count(cb)
-    vim.system({ "pdfinfo", preview_pdf }, {}, function(res)
-        if res.code == 0 then
-            local n = res.stdout:match("Pages:%s+(%d+)")
-            if n then state.pages.total = tonumber(n) end
-        end
-        if cb then cb() end
-    end)
-end
-
---- Convert current page of the PDF to PNG via pdftoppm, then render
+--- Convert SVG to PNG via rsvg-convert, then render
 function M.convert_and_render()
-    if not uv.fs_stat(preview_pdf) then return end
+    if not uv.fs_stat(preview_svg) then return end
 
     if current_job and not current_job:is_closing() then
         current_job:kill(9)
@@ -103,12 +92,11 @@ function M.convert_and_render()
     end
 
     current_job = vim.system({
-        "pdftoppm", "-png", "-singlefile",
-        "-f", tostring(state.pages.current),
-        "-l", tostring(state.pages.current),
-        "-r", tostring(config.ppi),
-        preview_pdf,
-        preview_dir .. "page",
+        "rsvg-convert",
+        "-d", tostring(config.ppi),
+        "-p", tostring(config.ppi),
+        "-o", preview_png,
+        preview_svg,
     }, {}, function(obj)
         if obj.signal == 9 then return end
         if obj.code == 0 then
@@ -118,7 +106,7 @@ function M.convert_and_render()
         else
             state.code.compiled = false
             vim.schedule(function()
-                log.warn("(preview) pdftoppm failed:\n" .. obj.stderr)
+                log.warn("(preview) rsvg-convert failed:\n" .. (obj.stderr or ""))
             end)
         end
         vim.schedule(function()
@@ -127,18 +115,11 @@ function M.convert_and_render()
     end)
 end
 
-local function on_pdf_change()
-    update_page_count(function()
-        M.convert_and_render()
-    end)
-end
-
 local function start_watcher()
     watcher = uv.new_fs_event()
-    local pdf_name = stem .. ".pdf"
     watcher:start(preview_dir, {}, function(err, fname)
-        if err or fname ~= pdf_name then return end
-        on_pdf_change()
+        if err or fname ~= "page.svg" then return end
+        M.convert_and_render()
     end)
 end
 
@@ -148,28 +129,6 @@ local function stop_watcher()
         watcher:close()
         watcher = nil
     end
-end
-
-local function configure_lsp()
-    local client = utils.get_lsp(state.code.buf)
-    if not client then return false end
-    client.notify("workspace/didChangeConfiguration", {
-        settings = {
-            exportPdf = "onType",
-            outputPath = preview_dir .. "$name",
-        },
-    })
-    return true
-end
-
-local function unconfigure_lsp()
-    local client = utils.get_lsp(state.code.buf)
-    if not client then return end
-    client.notify("workspace/didChangeConfiguration", {
-        settings = {
-            exportPdf = "never",
-        },
-    })
 end
 
 function M.update_meta()
@@ -238,32 +197,15 @@ function M.last_page()
     M.goto_page(state.pages.total)
 end
 
---- Nudge the LSP with a didChange on the main buffer to trigger onType export
-function M.poke_export()
-    local client = utils.get_lsp(state.code.buf)
-    if not client then return end
-    vim.schedule(function()
-        local content = table.concat(vim.api.nvim_buf_get_lines(state.code.buf, 0, -1, false), "\n")
-        local uri = vim.uri_from_bufnr(state.code.buf)
-        local ver = (vim.lsp.util.buf_versions[state.code.buf] or 0) + 1
-        vim.lsp.util.buf_versions[state.code.buf] = ver
-        client.notify("textDocument/didChange", {
-            textDocument = { uri = uri, version = ver },
-            contentChanges = { { text = content } },
-        })
-    end)
-end
-
 function M.open_preview()
     setup_preview_win()
     M.update_meta()
-    if not configure_lsp() then return end
     start_watcher()
     local scroll = require("typst-preview.scroll")
     local path = vim.api.nvim_buf_get_name(state.code.buf)
-    scroll.start(state.code.buf, path)
-    if uv.fs_stat(preview_pdf) then
-        on_pdf_change()
+    scroll.start(state.code.buf, path, preview_svg)
+    if uv.fs_stat(preview_svg) then
+        M.convert_and_render()
     end
 end
 
@@ -271,7 +213,6 @@ function M.close_preview()
     M.clear_preview()
     stop_watcher()
     require("typst-preview.scroll").stop()
-    unconfigure_lsp()
     if vim.api.nvim_win_is_valid(state.preview.win) then
         vim.api.nvim_win_close(state.preview.win, true)
     end

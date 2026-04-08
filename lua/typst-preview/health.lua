@@ -43,12 +43,20 @@ local function check_tmux_options()
 end
 
 function M.check()
-    health.start("MyPlugin: checking dependencies")
+    health.start("typst-preview: checking dependencies")
 
     check_bin("tinymist")
     check_bin("websocat")
-    check_bin("pdftoppm")
-    check_bin("pdfinfo")
+    check_bin("rsvg-convert")
+    check_bin("cargo")
+
+    local scroll = require("typst-preview.scroll")
+    if scroll.ensure_bridge() then
+        health.ok("tvp-bridge binary is built")
+    else
+        health.error("tvp-bridge binary failed to build")
+    end
+
     if vim.env.TMUX then check_tmux_options() end
 end
 

@@ -1,0 +1,24 @@
+[package]
+name = "tvp-bridge"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+reflexo = { git = "https://github.com/Myriad-Dreamin/typst.ts", features = ["flat-vector"] }
+reflexo-typst2vec = { git = "https://github.com/Myriad-Dreamin/typst.ts" }
+reflexo-vec2svg = { git = "https://github.com/Myriad-Dreamin/typst.ts" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+clap = { version = "4", features = ["derive"] }
+
+[patch.crates-io]
+typst = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-syntax = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-svg = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-eval = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-render = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-pdf = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-html = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-ide = { git = "https://github.com/Myriad-Dreamin/typst.git", tag = "typst.ts/v0.7.0-rc2" }
+typst-shim = { git = "https://github.com/Myriad-Dreamin/tinymist.git", rev = "c1c407878f0b75bf95415833a560822de587607e" }

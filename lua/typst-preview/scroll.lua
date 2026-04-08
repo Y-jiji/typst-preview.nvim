@@ -4,20 +4,27 @@ local M = {}
 
 local uv = vim.uv
 
+local plugin_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h:h")
+local bridge_bin = plugin_root .. "/bridge/target/release/tvp-bridge"
+
 ---@class ScrollState
 ---@field server uv.uv_process_t?
+---@field bridge uv.uv_process_t?
 ---@field ws uv.uv_process_t?
 ---@field ws_in uv.uv_pipe_t?
 ---@field map { line: number, page: number }[]
 ---@field buf number
 ---@field path string
+---@field svg_out string
 local st = {
     server = nil,
+    bridge = nil,
     ws = nil,
     ws_in = nil,
     map = {},
     buf = 0,
     path = "",
+    svg_out = "",
 }
 
 ---@param items table[]
@@ -92,9 +99,16 @@ local function connect_ws(port)
     end)
 end
 
---- Send buffer content to preview server as memory file
---- - `path`: absolute file path
---- - `content`: file content string
+---@param port string
+local function start_bridge(port)
+    st.bridge, _ = uv.spawn(bridge_bin, {
+        args = { "--url", "ws://127.0.0.1:" .. port .. "/",
+            "--page", "1",
+            "--out", st.svg_out },
+        stdio = { nil, nil, nil },
+    })
+end
+
 ---@param path string
 ---@param content string
 function M.update(path, content)
@@ -106,9 +120,8 @@ function M.update(path, content)
     st.ws_in:write(msg .. "\n")
 end
 
---- Send scroll position to preview server
---- - `line`: 0-indexed line
---- - `char`: 0-indexed character
+---@param line number
+---@param char number
 function M.scroll(line, char)
     if not st.ws_in then return end
     local msg = vim.json.encode({
@@ -120,9 +133,6 @@ function M.scroll(line, char)
     st.ws_in:write(msg .. "\n")
 end
 
---- Get the page number for a given 1-indexed line
---- - `line`: 1-indexed line number
---- - `return`: page number or nil
 ---@param line number
 ---@return number?
 function M.page_at(line)
@@ -135,16 +145,11 @@ function M.page_at(line)
     return page
 end
 
---- Start preview server and websocat for scroll sync
---- - `buf`: buffer number
---- - `path`: absolute file path
---- Set callback for successful compilation
 ---@param cb fun()
 function M.on_compile(cb)
     on_compile = cb
 end
 
---- Register per-buffer autocmds for a typst buffer
 ---@param bufnr number
 function M.watch_buf(bufnr)
     local path = vim.api.nvim_buf_get_name(bufnr)
@@ -158,11 +163,18 @@ function M.watch_buf(bufnr)
     })
 end
 
+---@return string
+function M.svg_path()
+    return st.svg_out
+end
+
 ---@param buf number
 ---@param path string
-function M.start(buf, path)
+---@param svg_out string
+function M.start(buf, path, svg_out)
     st.buf = buf
     st.path = path
+    st.svg_out = svg_out
 
     local stderr = uv.new_pipe()
     st.server, _ = uv.spawn("tinymist", {
@@ -177,22 +189,34 @@ function M.start(buf, path)
         return
     end
 
+    local ctrl_port = nil
+    local data_port = nil
     stderr:read_start(function(err, data)
         if err or not data then return end
-        local port = data:match("Control panel server listening on: 127%.0%.0%.1:(%d+)")
-        if port then
-            connect_ws(port)
+        local cp = data:match("Control panel server listening on: 127%.0%.0%.1:(%d+)")
+        if cp and not ctrl_port then
+            ctrl_port = cp
+            connect_ws(cp)
+        end
+        local dp = data:match("Data plane server listening on: 127%.0%.0%.1:(%d+)")
+        if dp and not data_port then
+            data_port = dp
+            start_bridge(dp)
         end
     end)
 end
 
 function M.stop()
+    if st.bridge then
+        st.bridge:kill(9)
+        st.bridge = nil
+    end
     if st.ws then
         st.ws:kill(9)
         st.ws = nil
     end
     if st.ws_in then
-        st.ws_in:close()
+        if not st.ws_in:is_closing() then st.ws_in:close() end
         st.ws_in = nil
     end
     if st.server then
@@ -200,6 +224,21 @@ function M.stop()
         st.server = nil
     end
     st.map = {}
+end
+
+--- Build the bridge binary if missing.
+---@return boolean
+function M.ensure_bridge()
+    if vim.fn.executable(bridge_bin) == 1 then return true end
+    local dir = plugin_root .. "/bridge"
+    vim.notify("typst-preview: building tvp-bridge (first time)...", vim.log.levels.INFO)
+    local res = vim.system({ "cargo", "build", "--release" }, { cwd = dir }):wait()
+    if res.code ~= 0 then
+        vim.notify("typst-preview: failed to build tvp-bridge:\n" .. (res.stderr or ""), vim.log.levels.ERROR)
+        return false
+    end
+    vim.notify("typst-preview: tvp-bridge built", vim.log.levels.INFO)
+    return true
 end
 
 return M

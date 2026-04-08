@@ -40,17 +40,6 @@ function M.bytes_to_number(s)
     return b1 * math.pow(2, 24) + b2 * math.pow(2, 16) + b3 * math.pow(2, 8) + b4
 end
 
----@param buf number
----@return vim.lsp.Client?
-function M.get_lsp(buf)
-    local cls = vim.lsp.get_clients({ bufnr = buf, name = "tinymist" })
-    if #cls == 0 then
-        log.error("tinymist LSP not attached to buffer")
-        return nil
-    end
-    return cls[1]
-end
-
 ---@param filename string
 ---@return number, number
 function M.get_page_dimensions(filename)
