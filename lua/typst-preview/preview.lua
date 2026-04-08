@@ -42,6 +42,7 @@ local current_job = nil
 
 ---@param force boolean?
 function M.update_preview_size(force)
+    if not uv.fs_stat(preview_png) then return end
     local img_height, img_width = utils.get_page_dimensions(preview_png)
     local page = state.pages.placements[state.pages.current]
     if force or not page or page.width ~= img_width or page.height ~= img_height then
