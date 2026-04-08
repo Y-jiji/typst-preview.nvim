@@ -105,7 +105,8 @@ function M.convert_and_render()
             end
         end
     end
-    if ppi <= 0 then ppi = 144 end
+    if ppi <= 0 then ppi = 96 end
+    if ppi > 192 then ppi = 192 end
     local zoom = tostring(ppi / 72)
     current_job = vim.system({
         "rsvg-convert",
