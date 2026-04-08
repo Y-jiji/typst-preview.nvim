@@ -165,6 +165,8 @@ end
 
 ---@param n number
 function M.goto_page(n)
+    local scroll = require("typst-preview.scroll")
+    state.pages.total = scroll.total_pages()
     if n > state.pages.total then
         n = state.pages.total
     elseif n < 1 then
@@ -174,7 +176,7 @@ function M.goto_page(n)
     if n == state.pages.current then return end
 
     state.pages.current = n
-    require("typst-preview.scroll").set_page(n)
+    scroll.set_page(n)
     statusline.update(state)
 end
 

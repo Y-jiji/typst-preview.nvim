@@ -50,6 +50,8 @@ local function find_heading(title, lines)
     return nil
 end
 
+local max_page = 1
+
 ---@param items table[]
 local function on_outline(items)
     vim.schedule(function()
@@ -57,9 +59,11 @@ local function on_outline(items)
         local map = {}
         local function collect(list)
             for _, item in ipairs(list) do
+                local pg = item.position.page_no
+                if pg > max_page then max_page = pg end
                 local ln = find_heading(item.title, lines)
                 if ln then
-                    table.insert(map, { line = ln, page = item.position.page_no })
+                    table.insert(map, { line = ln, page = pg })
                 end
                 if item.children then collect(item.children) end
             end
@@ -150,6 +154,11 @@ function M.update(path, content)
     else
         table.insert(pending, msg)
     end
+end
+
+---@return number
+function M.total_pages()
+    return max_page
 end
 
 ---@param line number
@@ -255,6 +264,7 @@ function M.stop()
     end
     st.map = {}
     pending = {}
+    max_page = 1
 end
 
 ---@return boolean
